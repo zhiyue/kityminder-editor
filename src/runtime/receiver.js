@@ -9,16 +9,26 @@
 
 define(function(require, exports, module) {
     var key = require('../tool/key');
+    var hotbox = require('hotbox');
 
     function ReceiverRuntime() {
         var fsm = this.fsm;
         var minder = this.minder;
+        var me = this;
 
         // 接收事件的 div
         var element = document.createElement('div');
         element.contentEditable = true;
+        /**
+         * @Desc: 增加tabindex属性使得element的contenteditable不管是trur还是false都能有focus和blur事件
+         * @Editor: Naixor
+         * @Date: 2015.09.14
+         */
+        element.setAttribute('tabindex', -1);
         element.classList.add('receiver');
         element.onkeydown = element.onkeypress = element.onkeyup = dispatchKeyEvent;
+        element.addEventListener('compositionstart', dispatchKeyEvent);
+        // element.addEventListener('compositionend', dispatchKeyEvent);
         this.container.appendChild(element);
 
         // receiver 对象
@@ -33,11 +43,48 @@ define(function(require, exports, module) {
                 selection.removeAllRanges();
                 selection.addRange(range);
                 element.focus();
+            },
+            /**
+             * @Desc: 增加enable和disable方法用于解决热核态的输入法屏蔽问题
+             * @Editor: Naixor
+             * @Date: 2015.09.14
+             */
+            enable: function() {
+                element.setAttribute("contenteditable", true);
+            },
+            disable: function() {
+                element.setAttribute("contenteditable", false);
+            },
+            /**
+             * @Desc: hack FF下div contenteditable的光标丢失BUG
+             * @Editor: Naixor
+             * @Date: 2015.10.15
+             */
+            fixFFCaretDisappeared: function() {
+                element.removeAttribute("contenteditable");
+                element.setAttribute("contenteditable", "true");
+                element.blur();
+                element.focus();
+            },
+            /**
+             * 以此事件代替通过mouse事件来判断receiver丢失焦点的事件
+             * @editor Naixor
+             * @Date 2015-12-2
+             */
+            onblur: function (handler) {
+                element.onblur = handler;
             }
         };
         receiver.selectAll();
 
         minder.on('beforemousedown', receiver.selectAll);
+        minder.on('receiverfocus', receiver.selectAll);
+        minder.on('readonly', function() {
+            // 屏蔽minder的事件接受，删除receiver和hotbox
+            minder.disable();
+            editor.receiver.element.parentElement.removeChild(editor.receiver.element);
+            editor.hotbox.$container.removeChild(editor.hotbox.$element);
+        });
 
         // 侦听器，接收到的事件会派发给所有侦听器
         var listeners = [];
@@ -53,7 +100,6 @@ define(function(require, exports, module) {
         };
 
         function dispatchKeyEvent(e) {
-
             e.is = function(keyExpression) {
                 var subs = keyExpression.split('|');
                 for (var i = 0; i < subs.length; i++) {
@@ -61,12 +107,10 @@ define(function(require, exports, module) {
                 }
                 return false;
             };
-
             var listener, jumpState;
             for (var i = 0; i < listeners.length; i++) {
 
                 listener = listeners[i];
-
                 // 忽略不在侦听状态的侦听器
                 if (listener.notifyState != '*' && listener.notifyState != fsm.state()) {
                     continue;
